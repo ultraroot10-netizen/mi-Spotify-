@@ -113,6 +113,7 @@ nav button svg{width:24px;height:24px}
       <div class="hrow">
         <button class="icon-btn" id="btn-sel" title="Seleccionar"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M4 5h16v16H4z"/><path d="M8 12l3 3 5-6"/></svg></button>
         <button class="icon-btn" id="btn-theme" title="Tema"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z"/></svg></button>
+        <button class="icon-btn" id="btn-cookies" title="Cookies YouTube">🍪</button>
       </div>
     </header>
     <div class="search">
@@ -364,6 +365,18 @@ $("p-addpl").addEventListener("click",()=>{
 function openModal(title, html){ $("modal-title").textContent=title; $("modal-body").innerHTML=html; $("modal").classList.add("show"); }
 function closeModal(){ $("modal").classList.remove("show"); $("modal-body").innerHTML=""; }
 $("modal").addEventListener("click",e=>{ if(e.target.id==="modal")closeModal(); });
+$("btn-cookies").addEventListener("click",()=>{
+  openModal("🍪 Cookies de YouTube",
+    `<div style="font-size:12px;color:#b3b3b3;margin-bottom:10px;line-height:1.5">Exporta tu <b>cookies.txt</b> de YouTube (extensión "Get cookies.txt LOCALLY") y pega aquí TODO su contenido. Así se evita el bloqueo "no eres un bot".</div>
+     <textarea id="ck" style="width:100%;height:170px;background:#242424;border:1px solid #333;border-radius:10px;color:#fff;font-size:12px;padding:10px;resize:none" placeholder="# Netscape HTTP Cookie File ..."></textarea>
+     <button class="btn" id="ck-save" style="margin-top:12px">Guardar</button>
+     <button class="btn grey" id="ck-clear" style="margin-top:8px">Quitar cookies</button>`);
+  $("ck").value=localStorage.getItem("yt_cookies")||"";
+  $("ck-save").onclick=async()=>{ const v=$("ck").value.trim(); localStorage.setItem("yt_cookies",v);
+    try{ await fetch("/api/cookies",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({cookies:v})}); closeModal(); alert("Cookies guardadas ✅"); }
+    catch(e){ alert("Error al guardar"); } };
+  $("ck-clear").onclick=()=>{ localStorage.removeItem("yt_cookies"); fetch("/api/cookies",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({cookies:""})}); closeModal(); };
+});
 $("btn-theme").addEventListener("click",()=>{
   const cols=["#1db954","#ff4757","#1e90ff","#9b59b6","#f39c12","#e84393"];
   openModal("Color de tema", `<div class="swatches">${cols.map(c=>`<div class="sw" data-c="${c}" style="background:${c}"></div>`).join("")}</div><button class="btn" id="th-ok">Aplicar</button>`);
@@ -405,6 +418,7 @@ if("mediaSession" in navigator){
 /* tema inicial + tendencias */
 (function(){
   const c=ls(K.theme); if(c)document.documentElement.style.setProperty("--green",c);
+  const ck=localStorage.getItem("yt_cookies"); if(ck) fetch("/api/cookies",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({cookies:ck})});
   fetch("/api/trending").then(r=>r.json()).then(d=>{
     const el=$("results"); el.innerHTML='<div class="section-title">🔥 Tendencias</div><div class="hscroll">'+d.slice(0,12).map(s=>`
       <div class="card" data-id="${s.id}"><img src="${esc(s.thumb)}" onerror="this.style.visibility='hidden'"><b>${esc(s.title||"")}</b><span>${esc(s.uploader||"")}</span></div>`).join("")+'</div><div class="section-title">🔍 Busca y toca una canción</div>';

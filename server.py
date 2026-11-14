@@ -8,6 +8,12 @@ app = Flask(__name__, static_folder="static", static_url_path="")
 SEARCH_OPTS = {"quiet": True, "skip_download": True, "extract_flat": "in_playlist",
                "noplaylist": True}
 CLIENTS = [["android"], ["tv_embedded"], ["web_embedded"], ["web"]]
+COOKIE_FILE = "/tmp/mispotify_cookies.txt"
+
+def _with_cookies(opts):
+    if os.path.exists(COOKIE_FILE):
+        opts["cookiefile"] = COOKIE_FILE
+    return opts
 
 def clean_title(t):
     return re.sub(r"[\(\[].*?[\)\]]", "", t or "").strip()
@@ -31,9 +37,9 @@ def _stream_url(vid):
     last = None
     for cl in CLIENTS:
         try:
-            opts = {"quiet": True, "format": "bestaudio/best", "skip_download": True,
+            opts = _with_cookies({"quiet": True, "format": "bestaudio/best", "skip_download": True,
                     "noplaylist": True,
-                    "extractor_args": {"youtube": {"player_client": cl}}}
+                    "extractor_args": {"youtube": {"player_client": cl}}})
             with YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(f"https://www.youtube.com/watch?v={vid}", download=False)
             url = info.get("url") or max(info["formats"], key=lambda f: f.get("abr") or 0)["url"]
@@ -45,6 +51,22 @@ def _stream_url(vid):
 @app.get("/")
 def index():
     return app.send_static_file("index.html")
+
+@app.post("/api/cookies")
+def set_cookies():
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+        txt = str(data.get("cookies") or "")
+        if txt.strip():
+            with open(COOKIE_FILE, "w") as f:
+                f.write(txt.strip() + "\n")
+            return jsonify({"ok": True})
+        else:
+            if os.path.exists(COOKIE_FILE):
+                os.remove(COOKIE_FILE)
+            return jsonify({"ok": False, "msg": "vacio"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.get("/api/search")
 def search():
@@ -98,9 +120,9 @@ def download(vid):
     use_ffmpeg = shutil.which("ffmpeg") is not None
     last = None
     for cl in CLIENTS:
-        opts = {"quiet": True, "format": "bestaudio/best", "noplaylist": True,
+        opts = _with_cookies({"quiet": True, "format": "bestaudio/best", "noplaylist": True,
                 "outtmpl": os.path.join(tmp, "%(id)s.%(ext)s"),
-                "extractor_args": {"youtube": {"player_client": cl}}}
+                "extractor_args": {"youtube": {"player_client": cl}}})
         if use_ffmpeg:
             opts["postprocessors"] = [{"key": "FFmpegExtractAudio",
                                        "preferredcodec": "mp3", "preferredquality": "192"}]
