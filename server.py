@@ -7,6 +7,7 @@ app = Flask(__name__, static_folder="static", static_url_path="")
 
 SEARCH_OPTS = {"quiet": True, "skip_download": True, "extract_flat": "in_playlist",
                "noplaylist": True}
+CLIENTS = [["android"], ["tv_embedded"], ["web_embedded"], ["web"]]
 
 def clean_title(t):
     return re.sub(r"[\(\[].*?[\)\]]", "", t or "").strip()
@@ -21,12 +22,25 @@ def _search(q, n=20):
             continue
         thumbs = e.get("thumbnails") or []
         thumb = thumbs[0]["url"] if thumbs else (e.get("thumbnail") or "")
-        out.append({
-            "id": e["id"], "title": e.get("title"),
-            "uploader": e.get("channel") or e.get("uploader") or "",
-            "duration": e.get("duration"), "thumb": thumb,
-        })
+        out.append({"id": e["id"], "title": e.get("title"),
+                    "uploader": e.get("channel") or e.get("uploader") or "",
+                    "duration": e.get("duration"), "thumb": thumb})
     return out
+
+def _stream_url(vid):
+    last = None
+    for cl in CLIENTS:
+        try:
+            opts = {"quiet": True, "format": "bestaudio/best", "skip_download": True,
+                    "noplaylist": True,
+                    "extractor_args": {"youtube": {"player_client": cl}}}
+            with YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(f"https://www.youtube.com/watch?v={vid}", download=False)
+            url = info.get("url") or max(info["formats"], key=lambda f: f.get("abr") or 0)["url"]
+            return url
+        except Exception as e:
+            last = e
+    raise last
 
 @app.get("/")
 def index():
@@ -63,12 +77,10 @@ def lyrics():
             req = urllib.request.Request(url, headers={"User-Agent": "MiSpotify/1.0"})
             data = json.load(urllib.request.urlopen(req, timeout=15))
             if data:
-                return jsonify({
-                    "synced": data[0].get("syncedLyrics") or "",
-                    "plain": data[0].get("plainLyrics") or "",
-                    "title": data[0].get("trackName", t),
-                    "artist": data[0].get("artistName", a),
-                })
+                return jsonify({"synced": data[0].get("syncedLyrics") or "",
+                                "plain": data[0].get("plainLyrics") or "",
+                                "title": data[0].get("trackName", t),
+                                "artist": data[0].get("artistName", a)})
         except Exception:
             continue
     return jsonify({"synced": "", "plain": ""})
@@ -76,11 +88,7 @@ def lyrics():
 @app.get("/api/stream/<vid>")
 def stream(vid):
     try:
-        with YoutubeDL({"quiet": True, "format": "bestaudio/best",
-                        "skip_download": True, "noplaylist": True}) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={vid}", download=False)
-        url = info.get("url") or max(info["formats"], key=lambda f: f.get("abr") or 0)["url"]
-        return redirect(url, code=302)
+        return redirect(_stream_url(vid), code=302)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -88,25 +96,28 @@ def stream(vid):
 def download(vid):
     tmp = tempfile.mkdtemp()
     use_ffmpeg = shutil.which("ffmpeg") is not None
-    opts = {"quiet": True, "format": "bestaudio/best", "noplaylist": True,
-            "outtmpl": os.path.join(tmp, "%(id)s.%(ext)s")}
-    if use_ffmpeg:
-        opts["postprocessors"] = [{"key": "FFmpegExtractAudio",
-                                   "preferredcodec": "mp3", "preferredquality": "192"}]
-    try:
-        with YoutubeDL(opts) as ydl:
-            ydl.extract_info(f"https://www.youtube.com/watch?v={vid}", download=True)
-        files = [f for f in os.listdir(tmp) if not f.endswith((".part", ".ytdl"))]
+    last = None
+    for cl in CLIENTS:
+        opts = {"quiet": True, "format": "bestaudio/best", "noplaylist": True,
+                "outtmpl": os.path.join(tmp, "%(id)s.%(ext)s"),
+                "extractor_args": {"youtube": {"player_client": cl}}}
         if use_ffmpeg:
-            target = next(f for f in files if f.endswith(".mp3")); ext = "mp3"
-        else:
-            target = next(f for f in files); ext = "m4a"
-        safe = re.sub(r"[^\w\- ]", "", request.args.get("t", "audio"))[:80] or "audio"
-        return send_file(os.path.join(tmp, target), as_attachment=True,
-                         download_name=f"{safe}.{ext}")
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+            opts["postprocessors"] = [{"key": "FFmpegExtractAudio",
+                                       "preferredcodec": "mp3", "preferredquality": "192"}]
+        try:
+            with YoutubeDL(opts) as ydl:
+                ydl.extract_info(f"https://www.youtube.com/watch?v={vid}", download=True)
+            files = [f for f in os.listdir(tmp) if not f.endswith((".part", ".ytdl"))]
+            if use_ffmpeg:
+                target = next(f for f in files if f.endswith(".mp3")); ext = "mp3"
+            else:
+                target = next(f for f in files); ext = "m4a"
+            safe = re.sub(r"[^\w\- ]", "", request.args.get("t", "audio"))[:80] or "audio"
+            return send_file(os.path.join(tmp, target), as_attachment=True,
+                             download_name=f"{safe}.{ext}")
+        except Exception as e:
+            last = e
+    return jsonify({"error": str(last)}), 500
 
 if __name__ == "__main__":
-    import os
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), threaded=True)
