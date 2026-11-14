@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: mispotify
+    runtime: docker
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /
